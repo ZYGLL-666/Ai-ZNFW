@@ -1,0 +1,5 @@
+.monkeycode/
+.monkeycode-tmp-files/
+native/obj/
+native/build-host/
+Ai-Laoliu-v1.0.0.zip

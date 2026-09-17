@@ -23,11 +23,51 @@ CONFDIR="$MODDIR/config"
 mkdir -p "$LOGDIR"
 mkdir -p "$CONFDIR"
 
-set_perm_recursive "$MODPATH" 0 0 0755 0644
-set_perm_recursive "$MODPATH/scripts" 0 0 0755 0755
-set_perm 0 0 0755 "$MODPATH/service.sh"
-set_perm 0 0 0755 "$MODPATH/post-fs-data.sh"
-set_perm 0 0 0755 "$MODPATH/action.sh"
+# 解析设备架构：优先使用框架注入的 $ARCH，缺失时回退到系统属性
+if [ -z "$ARCH" ]; then
+    _abi=$(getprop ro.product.cpu.abi 2>/dev/null)
+    [ -z "$_abi" ] && _abi=$(getprop ro.product.cpu.abilist 2>/dev/null | cut -d, -f1)
+    case "$_abi" in
+        arm64*)   ARCH=arm64 ;;
+        arm*)     ARCH=arm ;;
+        x86_64)   ARCH=x64 ;;
+        x86*)     ARCH=x86 ;;
+        *)        ARCH=arm64 ;;
+    esac
+fi
+
+# 根据设备架构选择对应的原生二进制
+case "$ARCH" in
+    arm64)             ABI_DIR="arm64" ;;
+    arm)               ABI_DIR="arm" ;;
+    x86)               ABI_DIR="x86" ;;
+    x64|x86_64)        ABI_DIR="x64" ;;
+    *)                 ABI_DIR="arm64" ;;
+esac
+if [ -f "$MODPATH/bin/$ABI_DIR/ai_service" ]; then
+    cp -f "$MODPATH/bin/$ABI_DIR/ai_service" "$MODPATH/ai_service"
+    ui_print "- 已选择架构: $ABI_DIR"
+else
+    ui_print "! 未找到对应架构的二进制 (bin/$ABI_DIR)"
+fi
+
+if command -v set_perm_recursive >/dev/null 2>&1; then
+    set_perm_recursive "$MODPATH" 0 0 0755 0644
+    set_perm_recursive "$MODPATH/scripts" 0 0 0755 0755
+fi
+if command -v set_perm >/dev/null 2>&1; then
+    set_perm 0 0 0755 "$MODPATH/service.sh"
+    set_perm 0 0 0755 "$MODPATH/post-fs-data.sh"
+    set_perm 0 0 0755 "$MODPATH/action.sh"
+    set_perm 0 0 0755 "$MODPATH/ai_service"
+fi
+
+# 权限兜底：部分管理器未提供 set_perm，或解压时丢失了执行位
+chmod 0755 "$MODPATH" "$MODPATH/scripts" 2>/dev/null
+chmod 0755 "$MODPATH/ai_service" 2>/dev/null
+chmod 0755 "$MODPATH/service.sh" "$MODPATH/post-fs-data.sh" "$MODPATH/action.sh" 2>/dev/null
+chmod 0755 "$MODPATH/scripts"/*.sh 2>/dev/null
+rm -rf "$MODPATH/bin"
 
 if [ ! -f "$CONFDIR/settings.conf" ]; then
     cat > "$CONFDIR/settings.conf" << 'CONF_EOF'
