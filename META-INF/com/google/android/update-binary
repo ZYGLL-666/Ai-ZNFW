@@ -1,0 +1,75 @@
+#!/sbin/sh
+umask 022
+
+OUTFD=$2
+ZIPFILE=$3
+TMPDIR=/dev/tmp
+
+ui_print() {
+    if [ -n "$OUTFD" ]; then
+        echo -e "ui_print $1\nui_print" >&$OUTFD
+    else
+        echo "$1"
+    fi
+}
+
+mount /data 2>/dev/null
+
+mkdir -p "$TMPDIR" 2>/dev/null
+[ -d "$TMPDIR" ] || TMPDIR=/data/local/tmp
+mkdir -p "$TMPDIR" 2>/dev/null
+
+MODPATH=$TMPDIR/ai_install
+rm -rf "$MODPATH"
+mkdir -p "$MODPATH" || { ui_print "! 无法创建临时目录"; exit 1; }
+cd "$MODPATH" || { ui_print "! 无法进入临时目录"; exit 1; }
+
+if command -v unzip >/dev/null 2>&1; then
+    UNZIP="unzip"
+elif command -v busybox >/dev/null 2>&1; then
+    UNZIP="busybox unzip"
+else
+    ui_print "! 系统缺少 unzip 命令，无法安装"
+    exit 1
+fi
+
+$UNZIP -o "$ZIPFILE" -x "META-INF/*" >/dev/null 2>&1
+
+if [ ! -f "$MODPATH/module.prop" ]; then
+    ui_print "! 模块解压失败，请确认 zip 根目录是 module.prop"
+    exit 1
+fi
+
+MODID=$(grep '^id=' "$MODPATH/module.prop" | head -n1 | cut -d= -f2)
+[ -z "$MODID" ] && { ui_print "! 无法读取模块 ID"; exit 1; }
+
+set_perm() {
+    chown "$1:$2" "$4" 2>/dev/null
+    chmod "$3" "$4" 2>/dev/null
+}
+set_perm_recursive() {
+    local d="$1" o="$2" g="$3" dm="$4" fm="$5"
+    find "$d" -type d 2>/dev/null | while read -r x; do
+        chown "$o:$g" "$x" 2>/dev/null; chmod "$dm" "$x" 2>/dev/null
+    done
+    find "$d" -type f 2>/dev/null | while read -r x; do
+        chown "$o:$g" "$x" 2>/dev/null; chmod "$fm" "$x" 2>/dev/null
+    done
+}
+
+[ -f "$MODPATH/customize.sh" ] && . "$MODPATH/customize.sh"
+
+TARGET=/data/adb/modules/$MODID
+rm -rf "$TARGET"
+mkdir -p "$TARGET"
+cp -af "$MODPATH"/. "$TARGET"/
+
+rm -rf "$TARGET/META-INF"
+touch "$TARGET/update"
+rm -f "$TARGET/remove" "$TARGET/disable"
+
+ui_print "- 模块已写入 $TARGET"
+ui_print "- 重启后生效"
+
+[ -n "$OUTFD" ] && exec 1>&- 2>&-
+exit 0
